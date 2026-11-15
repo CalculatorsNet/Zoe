@@ -1,0 +1,139 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>audit harness</title>
+<style>html,body{margin:0}iframe{display:block;border:0}</style>
+<script>
+const WIDTHS = [1440, 1024, 768, 390, 360, 320];
+const HEIGHT = 900;
+
+function audit(doc, win) {
+  const px = v => Math.round(v * 100) / 100;
+  const vw = win.innerWidth;
+  const out = { vw, scrollWidth: doc.documentElement.scrollWidth, overflow: [], targets: [], tiny: [] };
+  doc.querySelectorAll('body *').forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return;
+    if (r.right > vw + 1.5 || r.left < -1.5) {
+      const cs = win.getComputedStyle(el);
+      if (cs.position === 'fixed') return;
+      out.overflow.push({ tag: el.tagName.toLowerCase(), cls: (el.className && el.className.toString().slice(0, 40)) || '',
+        left: px(r.left), right: px(r.right), w: px(r.width) });
+    }
+  });
+  doc.querySelectorAll('a[href], button, input, select, textarea, [role=button], [tabindex]:not([tabindex="-1"])').forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return;
+    const cs = win.getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none') return;
+    if (r.width < 44 || r.height < 44) {
+      out.targets.push({ tag: el.tagName.toLowerCase(), cls: (el.className && el.className.toString().slice(0, 40)) || '',
+        text: (el.textContent || '').trim().slice(0, 24), w: px(r.width), h: px(r.height), id: el.id || '' });
+    }
+  });
+  doc.querySelectorAll('body *').forEach(el => {
+    let hasText = false;
+    el.childNodes.forEach(n => { if (n.nodeType === 3 && n.textContent.trim()) hasText = true; });
+    if (!hasText) return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return;
+    const fs = parseFloat(win.getComputedStyle(el).fontSize);
+    if (fs < 9) out.tiny.push({ tag: el.tagName.toLowerCase(), cls: (el.className && el.className.toString().slice(0, 40)) || '',
+      text: (el.textContent || '').trim().slice(0, 22), fs: px(fs) });
+  });
+  out.clipped = [];
+  doc.querySelectorAll('.strategy, .strategy-main, .strategy-score, .timeline, .risk-wrap, .dataset, .history-strip > p, .uncertainty li, .crop-sequence').forEach(el => {
+    if (el.scrollWidth > el.clientWidth + 1) out.clipped.push({ cls: (el.className || '').toString().slice(0, 40), scrollW: el.scrollWidth, clientW: el.clientWidth });
+  });
+  out.canvases = [...doc.querySelectorAll('canvas')].map(c => {
+    let ink = -1;
+    try {
+      const ctx = c.getContext('2d');
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      ink = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 8) ink++;
+    } catch (e) { ink = -2; }
+    return { w: c.width, h: c.height, ink, kind: c.dataset.kind || '' };
+  });
+  return out;
+}
+
+function contrast(doc, win) {
+  function lum(rgb) { const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }; return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]); }
+  function parse(s) { const m = s.match(/rgba?\(([^)]+)\)/); if (!m) return null; const p = m[1].split(',').map(x => parseFloat(x)); return { rgb: [p[0], p[1], p[2]], a: p.length > 3 ? p[3] : 1 }; }
+  function effBg(el) { let node = el; while (node) { const c = parse(win.getComputedStyle(node).backgroundColor); if (c && c.a > 0.9) return c.rgb; node = node.parentElement; } return [255, 255, 255]; }
+  function ratio(a, b) { const la = lum(a), lb = lum(b); const hi = Math.max(la, lb), lo = Math.min(la, lb); return (hi + 0.05) / (lo + 0.05); }
+  const sels = ['.lede', '.intro-foot', '.readout-label', '.slider-row small', '.run-note', '.step-state',
+    '.history-strip > p', '.strategy-main p', '.strategy-score .score-label', '.crop-sequence span', '.risk-label',
+    '.timeline-row .tl-head', '.why', '.uncertainty li', '.dataset p', '.dataset code', '.dataset-title',
+    '.ledger-key', '.method-note', 'footer', '.map-caption', '.record-stamp b', '.strategy-score .score-num'];
+  return sels.map(sel => {
+    const el = doc.querySelector(sel);
+    if (!el) return { sel, missing: true };
+    const cs = win.getComputedStyle(el);
+    const fg = parse(cs.color); const bg = effBg(el);
+    const fs = parseFloat(cs.fontSize); const fw = cs.fontWeight;
+    const large = fs >= 24 || (fs >= 18.66 && parseInt(fw) >= 700);
+    const r = ratio(fg.rgb, bg);
+    return { sel, ratio: Math.round(r * 100) / 100, fs: Math.round(fs * 10) / 10, need: large ? 3 : 4.5, pass: r >= (large ? 3 : 4.5) };
+  });
+}
+
+function waitFor(fn, ms) {
+  return new Promise(res => { const t0 = Date.now(); (function loop() {
+    let ok = false; try { ok = fn(); } catch (e) {}
+    if (ok) return res(true);
+    if (Date.now() - t0 > ms) return res(false);
+    setTimeout(loop, 250);
+  })(); });
+}
+
+async function run() {
+  const results = {};
+  window.__progress = { stage: 'start' };
+  for (const w of WIDTHS) {
+    window.__progress = { stage: 'iframe', w };
+    const iframe = document.createElement('iframe');
+    iframe.width = w; iframe.height = HEIGHT; iframe.src = '/';
+    document.documentElement.appendChild(iframe);
+    await new Promise(res => { iframe.onload = res; });
+    const win = iframe.contentWindow, doc = iframe.contentDocument;
+    window.__progress = { stage: 'loaded', w };
+    await waitFor(() => doc.getElementById('use-saved'), 15000);
+    doc.getElementById('use-saved').click();
+    await waitFor(() => !doc.getElementById('run-analysis').disabled, 30000);
+    window.__progress = { stage: 'run', w };
+    doc.getElementById('run-analysis').click();
+    const ok = await waitFor(() => !doc.getElementById('results').hidden, 90000);
+    window.__progress = { stage: 'rendered', w, ok };
+    await new Promise(r => setTimeout(r, 1600));
+    results[w] = { rendered: ok, audit: audit(doc, win), contrast: contrast(doc, win) };
+    iframe.remove();
+  }
+  window.__audit = { done: true, widths: WIDTHS, results };
+}
+const params = new URLSearchParams(location.search);
+if (!params.get('shoot')) {
+  run().catch(e => { window.__audit = { done: true, error: String(e && e.stack || e) }; });
+}
+
+async function shoot(w) {
+  const iframe = document.createElement('iframe');
+  iframe.id = 'shotframe';
+  iframe.width = w; iframe.height = 900; iframe.src = '/';
+  document.documentElement.appendChild(iframe);
+  await new Promise(res => { iframe.onload = res; });
+  const win = iframe.contentWindow, doc = iframe.contentDocument;
+  await waitFor(() => doc.getElementById('use-saved'), 15000);
+  doc.getElementById('use-saved').click();
+  await waitFor(() => !doc.getElementById('run-analysis').disabled, 30000);
+  doc.getElementById('run-analysis').click();
+  await waitFor(() => !doc.getElementById('results').hidden, 90000);
+  await new Promise(r => setTimeout(r, 1700));
+  iframe.height = doc.documentElement.scrollHeight + 4;
+  await new Promise(r => setTimeout(r, 900));
+  window.__shotReady = true;
+}
+
+const shootParam = new URLSearchParams(location.search).get('shoot');
+if (shootParam) shoot(parseInt(shootParam, 10));
+</script>
