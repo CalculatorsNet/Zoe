@@ -40,8 +40,6 @@ NASA POWER is the only product used in the live analysis. The other products bel
 | SRTM `SRTMGL1` | NASA, U.S. NGA, and German and Italian space agencies | Elevation-derived slope and erosion proxy | [DOI](https://doi.org/10.5067/MEaSUREs/SRTM/SRTMGL1N.003) |
 | GRACE / GRACE-FO assimilation `GRACEDADM_CLSM0125US_7D` | NASA assimilation product; GRACE-FO is a NASA-GFZ partnership mission | Regional, multi-year water-storage context | [DOI](https://doi.org/10.5067/UH653SEZR9VQ) |
 
-Earthdata Login is free at <https://urs.earthdata.nasa.gov>. Keep credentials out of this repository and out of GitHub Pages. The current app does not fetch the restricted granules listed above. ECOSTRESS V1 `ECO3ETALEXI` was retired; the table names its Version 2 successor.
-
 ## How the comparison works
 
 - The weather screen flags days that are unusually hot with low recent rain, unusually hot with dry air and high wind, or very wet with freezing temperatures. These are screening rules, not proof of crop damage.
