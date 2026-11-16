@@ -1,25 +1,29 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  const pagesMode = location.hostname.endsWith('.github.io');
   const points = [];
   let polygon = null;
   let hasDrawn = false;
+  let savedSampleSelected = false;
   let priorMessages = new Map();
-
-  class ZOEMessage extends HTMLElement {
-    set message(value) {
-      const paragraph = this.querySelector('p');
-      if (paragraph) paragraph.textContent = value;
-    }
+  const localUrl = path => new URL(path, document.baseURI).toString();
+  if (pagesMode) {
+    $('hosting-note').hidden = false;
+    $('location-search').hidden = true;
+    ['water', 'soil', 'forage'].forEach(key => { $(key).disabled = true; });
+    $('priority-title').textContent = 'The sample’s priorities';
+    $('ZOE-priority').querySelector('p').textContent = 'These fixed values match the saved example. Run locally to change them.';
+    $('analyze').textContent = 'Open sample notes';
   }
-  if (!customElements.get('zoe-message')) customElements.define('zoe-message', ZOEMessage);
 
   function say(text, id = 'ZOE-field') {
     const panel = $(id);
     if (!panel) return;
     if (priorMessages.get(id) === text) text += ' Take your time.';
     priorMessages.set(id, text);
-    panel.message = text;
+    const paragraph = panel.querySelector('p');
+    if (paragraph) paragraph.textContent = text;
   }
 
   function notify(text, isError = false) {
@@ -170,18 +174,20 @@
     $('findings').hidden = true;
     if (polygon) map.removeLayer(polygon);
     points.forEach(point => { if (point.marker) map.removeLayer(point.marker); });
+    const style = getComputedStyle(document.documentElement);
+    const color = name => style.getPropertyValue(name).trim();
     points.forEach(point => {
       point.marker = L.circleMarker(point.latlng, {
-        radius: 6, color: '#FBF7EF', weight: 2, fillColor: '#7A9C5A', fillOpacity: 1
+        radius: 7, color: color('--paper-card'), weight: 2, fillColor: color('--field-boundary'), fillOpacity: 1
       }).addTo(map);
     });
     const valid = points.length >= 3;
     if (valid) {
       polygon = L.polygon(points.map(point => point.latlng), {
-        color: '#7A9C5A', weight: 3, dashArray: '7 5', fillColor: '#A78942', fillOpacity: .18
+        color: color('--field-boundary'), weight: 3, dashArray: '8 6', fillColor: color('--field-sun'), fillOpacity: .2
       }).addTo(map);
     }
-    $('analyze').disabled = !valid;
+    $('analyze').disabled = !valid || (pagesMode && !savedSampleSelected);
     $('undo').disabled = points.length === 0;
     $('clear').disabled = points.length === 0;
     $('field-count').textContent = valid ? `${points.length} corners marked` : points.length ? `${points.length} of 3 corners` : 'Waiting for your field';
@@ -204,27 +210,29 @@
   }
 
   $('map').tabIndex = 0;
-  map.on('click', event => { points.push({ latlng: event.latlng }); updateField(); });
+  map.on('click', event => { savedSampleSelected = false; points.push({ latlng: event.latlng }); updateField(); });
   $('map').addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
+      savedSampleSelected = false;
       points.push({ latlng: map.getCenter() });
       updateField();
     }
   });
-  $('undo').addEventListener('click', () => { points.pop(); updateField(); });
-  $('clear').addEventListener('click', () => { points.length = 0; updateField(); });
+  $('undo').addEventListener('click', () => { savedSampleSelected = false; points.pop(); updateField(); });
+  $('clear').addEventListener('click', () => { savedSampleSelected = false; points.length = 0; updateField(); });
 
   $('saved').addEventListener('click', async () => {
     try {
-      const response = await fetch('/api/demo');
+      const response = await fetch(localUrl(pagesMode ? 'data/demo_field.json' : 'api/demo'));
       if (!response.ok) throw new Error('The sample field did not load. Try again.');
       const data = await response.json();
       points.length = 0;
       data.geometry.coordinates[0].slice(0, -1).forEach(([lng, lat]) => points.push({ latlng: L.latLng(lat, lng) }));
+      savedSampleSelected = true;
       updateField();
       map.fitBounds(L.latLngBounds(points.map(point => point.latlng)).pad(.2));
-      say('The sample field is marked. Set your priorities, then run the comparison.', 'ZOE-field');
+      say(pagesMode ? 'The sample field is marked. Its saved notes are ready to open.' : 'The sample field is marked. Set your priorities, then run the comparison.', 'ZOE-field');
     } catch (error) { notify(error.message, true); }
   });
 
@@ -312,7 +320,7 @@
     });
     main.append(title, score, scoreHelp, summary, sequenceLabel, calendar, reasons, makeElement('p', 'strategy-data', 'Weather estimate: NASA POWER · Crop traits: broad assumptions'));
 
-    const quote = makeElement('zoe-message', 'zoe-quote');
+    const quote = makeElement('blockquote', 'zoe-quote');
     const mark = document.createElement('img');
     mark.src = 'static/zoe-mark.svg'; mark.alt = ''; mark.width = 40; mark.height = 40;
     const quoteText = makeElement('p', '', strategy.name ? `${strategy.name} is one option from the search. Check the crop order against your soil, livestock needs, equipment, and market.` : 'Use this as a starting point for a local conversation.');
@@ -328,7 +336,9 @@
     $('stress-days').textContent = `${data.record.worst_compound_days} days`;
     $('novelty').textContent = `${Math.round(data.record.novelty_rate * 100)}%`;
     $('results-intro').textContent = data.offline ? 'This sample uses synthetic weather for practice. It is not a NASA observation.' : 'NASA POWER estimates daily weather at the center of your field outline.';
-    $('source-key').textContent = data.offline ? 'This sample uses saved synthetic Story County weather. NASA POWER and the other products below are not inputs to this offline result.' : 'These scores use NASA POWER. The other products are possible additions; they are not connected to the calculation yet.';
+    $('source-key').textContent = data.offline
+      ? 'Saved Story County sample. The weather series is synthetic; no NASA observation feeds this result.'
+      : 'This run used the sources marked “Used here.” Other products are not counted until their data are fetched and checked.';
     say(`${data.record.worst_year} was the hardest year in this record. Each rotation is scored against it.`, 'ZOE-results');
     const list = $('strategies');
     list.replaceChildren(...data.strategies.map(makeStrategy));
@@ -339,8 +349,16 @@
     $('datasets').replaceChildren(...data.datasets.map(dataset => {
       const entry = makeElement('div', `dataset ${dataset.state}`);
       const title = makeElement('div', 'dataset-title');
-      title.append(makeElement('i'), makeElement('strong', '', dataset.name), makeElement('span', 'dataset-state', dataset.state === 'live' ? 'Used for this analysis' : 'Possible addition'));
-      entry.append(title, makeElement('p', 'dataset-role', dataset.role), makeElement('p', 'dataset-product', dataset.product.replaceAll(' · ', ', ')), makeElement('code', '', dataset.id));
+      const stateLabels = { used: 'Used here', 'not-used': 'Not connected', live: 'Used here', context: 'Not connected' };
+      title.append(makeElement('i'), makeElement('strong', '', dataset.name), makeElement('span', 'dataset-state', stateLabels[dataset.state] || 'Check source'));
+      entry.append(title, makeElement('p', 'dataset-owner', dataset.agency || 'Data source'), makeElement('p', 'dataset-role', dataset.role), makeElement('p', 'dataset-product', dataset.product.replaceAll(' · ', ', ')), makeElement('code', '', dataset.id), makeElement('p', 'dataset-provider', dataset.provider || ''), makeElement('p', 'dataset-status-note', dataset.status_note || ''));
+      if (dataset.url) {
+        const link = makeElement('a', 'dataset-link', 'Open product record');
+        link.href = dataset.url;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        entry.append(link);
+      }
       return entry;
     }));
     $('findings').hidden = false;
@@ -354,21 +372,29 @@
     boundary.push(boundary[0]);
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
-    button.innerHTML = '<img class="button-seed" src="static/zoe-mark.svg" alt="" width="20" height="20"> Checking rain and heat history…';
+    button.innerHTML = pagesMode
+      ? '<img class="button-seed" src="static/zoe-mark.svg" alt="" width="20" height="20"> Opening saved notes…'
+      : '<img class="button-seed" src="static/zoe-mark.svg" alt="" width="20" height="20"> Checking rain and heat history…';
     $('ZOE-results').classList.add('thinking');
     $('findings').hidden = false;
-    $('findings-title').textContent = 'Checking the field notes';
+    $('findings-title').textContent = pagesMode ? 'Opening the sample notes' : 'Checking the field notes';
     $('strategies').replaceChildren();
-    say('I’m checking the climate record for this field center. It can take a little while.', 'ZOE-results');
+    say(pagesMode ? 'These saved notes use the Story County sample field and synthetic weather.' : 'I’m checking the climate record for this field center. It can take a little while.', 'ZOE-results');
     try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          polygon: { type: 'Polygon', coordinates: [boundary] },
-          priorities: { water: Number($('water').value), soil: Number($('soil').value), forage: Number($('forage').value) }
-        })
-      });
+      let response;
+      if (pagesMode) {
+        if (!savedSampleSelected) throw new Error('Choose the Story County sample to open the saved analysis.');
+        response = await fetch(localUrl('data/demo_analysis.json'));
+      } else {
+        response = await fetch(localUrl('api/analyze'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            polygon: { type: 'Polygon', coordinates: [boundary] },
+            priorities: { water: Number($('water').value), soil: Number($('soil').value), forage: Number($('forage').value) }
+          })
+        });
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'I couldn’t read this field’s climate record. Try again.');
       $('findings-title').textContent = 'What the seasons remember';
@@ -381,14 +407,30 @@
     } finally {
       $('ZOE-results').classList.remove('thinking');
       button.removeAttribute('aria-busy');
-      button.textContent = 'Test this field';
-      button.disabled = points.length < 3;
+      button.textContent = pagesMode ? 'Open sample notes' : 'Test this field';
+      button.disabled = points.length < 3 || (pagesMode && !savedSampleSelected);
     }
   });
 
-  document.querySelectorAll('.steps a').forEach(link => link.addEventListener('click', () => {
-    document.querySelectorAll('.steps a').forEach(item => item.classList.remove('active'));
-    link.classList.add('active');
-  }));
+  const stepLinks = [...document.querySelectorAll('.steps a')];
+  function setActiveStep(id) {
+    stepLinks.forEach(link => {
+      const active = link.hash === `#${id}`;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'step');
+      else link.removeAttribute('aria-current');
+    });
+  }
+  stepLinks.forEach(link => link.addEventListener('click', () => setActiveStep(link.hash.slice(1))));
+  if ('IntersectionObserver' in window) {
+    const stepObserver = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible) setActiveStep(visible.target.id);
+    }, { rootMargin: '-24% 0px -58% 0px', threshold: [0, .2, .5, .8] });
+    stepLinks.forEach(link => {
+      const section = $(link.hash.slice(1));
+      if (section) stepObserver.observe(section);
+    });
+  }
   if (new URLSearchParams(location.search).get('demo') === 'true') $('saved').click();
 })();
