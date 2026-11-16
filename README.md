@@ -1,44 +1,52 @@
 # ZOE
 
-A NASA Space Apps 2026 decision-support prototype for exploring crop rotations under climate variability. Draw a field, set water / soil / forage priorities, then compare four-season sequences against compound stress in that location's historical climate record.
+ZOE helps farmers compare crop-rotation ideas against difficult years in a location’s climate record. It shows model-generated options and trade-offs for local discussion. It does not predict yields or choose crops for a farm.
 
-## Run it
+For the full project explanation, including the model, product attribution, and judge notes, see [JUDGE-GUIDE.md](JUDGE-GUIDE.md).
 
-Requires Python 3.10+ and the packages in `requirements.txt`.
+## Run ZOE locally
 
-```sh
+Use Python 3.10 or newer. From the project folder, run these commands in fish:
+
+```fish
+python3 -m venv .venv
+source .venv/bin/activate.fish
 python -m pip install -r requirements.txt
 python server.py
 ```
 
-Open <http://127.0.0.1:8000>. Click at least three corners on the map, tune the three priorities, and run the analysis. **Use saved field** loads the Story County, Iowa sample boundary. `?demo=true` loads that boundary on page open. The bundled climate series is a deterministic synthetic fallback for a dependable offline interaction; it is clearly identified in the analysis as a saved climate record and is not represented as observed NASA data.
+Open <http://127.0.0.1:8000>. Search for a U.S. city or ZIP code, then mark at least three field corners. Choose **Use sample field** to load the Story County example. Stop the server with Ctrl+C. Leave the virtual environment with `deactivate`.
 
-The interface uses Red Hat Display and Red Hat Text from Google Fonts, with Red Hat Mono for numeric values. An internet connection is needed to load those typefaces.
+For a live analysis, the server requests daily NASA POWER data from 2004 through a date expected to be complete. POWER supplies a gridded estimate for the field outline’s center point. It does not measure conditions across the whole field, and no Earthdata account is needed for this request.
 
-NASA POWER is fetched live from the daily point API (`T2M`, `T2M_MAX`, `T2M_MIN`, `PRECTOTCORR`, `RH2M`, `WS2M`, and solar radiation). It does not require an API key. `/api/health` reports server readiness. Earthdata Login is free at <https://urs.earthdata.nasa.gov>; put credentials in `~/.netrc` only if you extend the server to request restricted Earthdata granules. The current prototype does not download those granules.
+## Try the GitHub Pages sample
 
-## NASA data ledger
+The project’s root `index.html` is the entry page. The workflow in `.github/workflows/pages.yml` publishes it with the static files and saved Story County sample. In GitHub, open **Settings → Pages** and choose **GitHub Actions** as the source. After the workflow succeeds, GitHub shows the site address in its deployment summary.
 
-POWER is the live data source. The other listed products are mapped to roles in the model and shown in the ledger as context / future integrations; this build does not ingest their granules. Do not treat their presence in the ledger as evidence of data fusion.
+Pages cannot run the Python model or keep Earthdata credentials private. Its walkthrough opens the saved Story County result with `?demo=true`. That result uses a synthetic weather series, which the page labels clearly. Live NASA POWER analysis, place search, custom field boundaries, and adjustable priorities are available when you run the Python server locally.
 
-| Dataset | Product / identifier | Intended role |
-|---|---|---|
-| SMAP L4 | SPL4SMGP · DOI [10.5067/EVKPQZ4AFC4D](https://doi.org/10.5067/EVKPQZ4AFC4D) | Root-zone moisture context; 9 km resolution |
-| ECOSTRESS | ECO3ETALEXI V001 | Evapotranspiration / heat context |
-| GPM IMERG Final | GPM_3IMERGHH V07 · DOI [10.5067/GPM/IMERG/3B-HH/07](https://doi.org/10.5067/GPM/IMERG/3B-HH/07) | Rainfall intensity and dry spells |
-| MODIS Terra VI | MOD13Q1 V061 · DOI [10.5067/MODIS/MOD13Q1.061](https://doi.org/10.5067/MODIS/MOD13Q1.061) | Vegetation condition and phenology |
-| Landsat C2 L2 | USGS Landsat Collection 2 STAC | Higher-resolution land-use history |
-| NASA POWER | Daily point API, MERRA-2 | Live meteorological backbone |
-| SRTM | SRTMGL1 · DOI [10.5067/MEaSUREs/SRTM/SRTMGL1N.003](https://doi.org/10.5067/MEaSUREs/SRTM/SRTMGL1N.003) | Slope / erosion proxy |
-| GRACE / GRACE-FO | GRACEDADM_CLSM0125US_7D V4.0 | Long-term water availability context |
+## Data sources and attribution
 
-## How the analysis works
+NASA POWER is the only product used in the live analysis. The other products below are listed with their providers and intended roles. They do not affect scores until the app downloads, checks, and uses their data. The results page marks which sources fed each run.
 
-- Compound-risk baseline combines an Isolation Forest multivariate anomaly detector with a transparent joint heat / low-30-day-rainfall threshold.
-- A seasonal envelope and Kernel Density Estimate summarize the observed climate-condition distribution. The novelty fraction is a statistical proxy, not a crop-specific forecast.
-- A Random Forest path is fitted to illustrative crop-trait proxies, not measured yield data.
-- A custom categorical particle swarm searches four-season crop sequences. Crop coefficients are fixed illustrative assumptions; the ranking is a scenario exploration, not locally calibrated agronomy.
+| Product | Producer or provider | Intended role | Product record |
+|---|---|---|---|
+| NASA POWER daily point API (MERRA-2) | NASA Langley Research Center | Temperature, precipitation, humidity, wind, and solar radiation; used live | [API documentation](https://power.larc.nasa.gov/docs/services/api/temporal/daily/) |
+| SMAP L4 `SPL4SMGP`, Version 8 | NASA; NSIDC DAAC | Root-zone soil-moisture context at about 9 km | [Version 8 record](https://nsidc.org/data/spl4smgp/versions/8), [DOI](https://doi.org/10.5067/T5RUATAQREF8) |
+| GPM IMERG Final `GPM_3IMERGHH`, V07 | NASA and JAXA mission; NASA GES DISC distributes the data | Rainfall intensity and dry-spell context | [DOI](https://doi.org/10.5067/GPM/IMERG/3B-HH/07) |
+| ECOSTRESS tiled ET dis-ALEXI `ECO_L3T_ET_ALEXI.002` | NASA JPL / LP DAAC; instrument aboard the International Space Station | Evapotranspiration and plant-water stress | [DOI](https://doi.org/10.5067/ECOSTRESS/ECO_L3T_ET_ALEXI.002) |
+| MODIS Terra vegetation indices `MOD13Q1.061` | NASA; LP DAAC | Vegetation condition and phenology | [DOI](https://doi.org/10.5067/MODIS/MOD13Q1.061) |
+| Landsat Collection 2 Level-2 surface reflectance | Joint NASA-USGS program; USGS hosts and distributes the STAC collection | Finer-scale vegetation and land-cover history | [USGS STAC collection](https://landsatlook.usgs.gov/stac-server/collections/landsat-c2l2-sr) |
+| SRTM `SRTMGL1` | NASA, U.S. NGA, and German and Italian space agencies | Elevation-derived slope and erosion proxy | [DOI](https://doi.org/10.5067/MEaSUREs/SRTM/SRTMGL1N.003) |
+| GRACE / GRACE-FO assimilation `GRACEDADM_CLSM0125US_7D` | NASA assimilation product; GRACE-FO is a NASA-GFZ partnership mission | Regional, multi-year water-storage context | [DOI](https://doi.org/10.5067/UH653SEZR9VQ) |
 
-## Limitations
+Earthdata Login is free at <https://urs.earthdata.nasa.gov>. Keep credentials out of this repository and out of GitHub Pages. The current app does not fetch the restricted granules listed above. ECOSTRESS V1 `ECO3ETALEXI` was retired; the table names its Version 2 successor.
 
-NASA POWER describes gridded / reanalysis conditions, not field-gauge observations. SMAP is roughly 9 km and cannot resolve within-field moisture variation. The offline record is synthetic. Crop traits and season timing require local validation. Soil test values, drainage, disease pressure, crop prices, markets, insurance, policy and farm equipment are not modeled. Review any option with local extension staff, a soil test, and the farmer's own experience. This tool supports farmer judgment; it does not replace it.
+## How the comparison works
+
+- The weather screen flags days that are unusually hot with low recent rain, unusually hot with dry air and high wind, or very wet with freezing temperatures. These are screening rules, not proof of crop damage.
+- ZOE calls the year with the most flagged days the hardest year in that record. Its historical-rarity measure compares that year with the same record; it is not a forecast or a future probability.
+- Crop scores use hand-set traits for water needs, heat and weather sensitivity, soil contribution, cover, nitrogen fixation, and forage. They are not measured yield or soil-improvement estimates.
+- A custom particle-swarm search compares four-crop sequences using the hardest-year score, soil traits, and the priorities set by the farmer.
+
+Soil tests, drainage, planting dates, disease, markets, policy, livestock needs, and farm equipment are not included. Even coarse satellite products cannot show every difference within a field. Review any option with local extension staff or an agronomist.
